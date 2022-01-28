@@ -24,7 +24,8 @@ async fn main() {
     当用户输入check时，执行检查当前售卖的物品列表。
     */
     if let true = cli.check {
-        test().await;
+        let a = test().await;
+        println!("{:?}", a);
         return;
     }
 

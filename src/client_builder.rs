@@ -51,6 +51,6 @@ impl ClientBuilder {
             Some(reqwest_client) => reqwest_client,
             None => reqwest::ClientBuilder::new().build()?,
         };
-        Ok(reqwest_client)
+        Ok(reqwest_client.clone())
     }
 }
