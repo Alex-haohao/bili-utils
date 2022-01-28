@@ -1,21 +1,24 @@
+use crate::client_builder::ClientBuilder;
 use reqwest;
 use reqwest::Client as ReqwestClient;
 
 mod client_builder;
 mod error;
 
-// tokio let's us use "async" on our main function
-#[tokio::main]
 pub async fn test() {
-    let client = reqwest::Client::new();
-    let response = client
-        .get("https://api.spotify.com/v1/search")
-        // confirm the request using send()
-        .send()
-        .await
-        // the rest is the same!
-        .unwrap()
-        .text()
-        .await;
-    println!("{:?}", response);
+    let temp_client = reqwest::Client::new();
+    // create default ClientBuilder
+    let client_builder = ClientBuilder::default();
+    // 设置自定义的client
+    let client_builder = client_builder.set_reqwest_client(temp_client);
+    let client_builder = client_builder.build();
+
+    if let Err(ref error) = client_builder {
+        println!("{:?}", error);
+    }
+
+    if let Ok(ref client) = client_builder {
+        let result = client.get("https://api.spotify.com/v1/search").send().await;
+        println!("{:?}", result);
+    }
 }

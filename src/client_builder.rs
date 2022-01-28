@@ -6,10 +6,9 @@ use reqwest::Client;
 /// A `ClientBuilder` can be used to create a `Client` with custom configuration.
 #[derive(Clone, Debug)]
 pub struct ClientBuilder {
-    reqwest_client: Option<reqwest::Client>,
+    pub reqwest_client: Option<reqwest::Client>,
     max_requests_per_second: usize,
     max_threads_cpu: usize,
-    cookie: Option<String>,
 }
 
 impl Default for ClientBuilder {
@@ -52,6 +51,6 @@ impl ClientBuilder {
             Some(reqwest_client) => reqwest_client,
             None => reqwest::ClientBuilder::new().build()?,
         };
-        Ok(reqwest_client.clone())
+        Ok(reqwest_client)
     }
 }

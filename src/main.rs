@@ -1,5 +1,5 @@
-use clap::Parser;
 use bili_suit::test;
+use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[clap(name = "bili-suit")]
@@ -15,14 +15,16 @@ struct Args {
     did: bool,
 }
 
-fn main() {
+// tokio let's us use "async" on our main function
+#[tokio::main]
+async fn main() {
     let cli = Args::parse();
 
     /*
     当用户输入check时，执行检查当前售卖的物品列表。
     */
     if let true = cli.check {
-        test();
+        test().await;
         return;
     }
 
