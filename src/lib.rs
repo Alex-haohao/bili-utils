@@ -1,29 +1,18 @@
 use crate::client_builder::ClientBuilder;
+use crate::login::get_login_qr_code_url;
 use anyhow::Result;
 use reqwest;
-use reqwest::{Error, Response};
 
 mod client_builder;
+mod login;
 
-pub async fn test() -> Result<Response> {
+pub async fn test() -> Result<String> {
     let temp_client = reqwest::Client::new();
     // create default ClientBuilder
     let client_builder = ClientBuilder::default();
     // 设置自定义的client
     let client_builder = client_builder.set_reqwest_client(temp_client);
-    let client_builder = client_builder.build();
-
-    match client_builder {
-        Ok(client) => {
-            let res = client.get("https://www.baidu.com").send().await;
-            return match res {
-                Ok(response) => Ok(response),
-                Err(e) => {
-                    println!("{:?}", e);
-                    Err(e.into())
-                }
-            };
-        }
-        Err(e) => Err(e),
-    }
+    let client = client_builder.build()?;
+    let qrcode = get_login_qr_code_url(client).await;
+    qrcode
 }

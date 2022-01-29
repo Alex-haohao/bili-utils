@@ -25,7 +25,6 @@ async fn main() {
     */
     if let true = cli.check {
         let a = test().await;
-        println!("{:?}", a);
         return;
     }
 
