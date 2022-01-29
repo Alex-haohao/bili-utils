@@ -1,6 +1,6 @@
-use crate::client_builder::ClientBuilder;
 use anyhow::Result;
-use reqwest::Response;
+use qrcode::render::unicode;
+use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -17,7 +17,10 @@ pub struct GetLoginQrCodeApiResponse {
     pub data: GetLoginQrCodeData,
 }
 
-pub async fn get_login_qr_code_url(client: reqwest::Client) -> Result<String> {
+/*
+得到登录二维码的url
+*/
+pub async fn get_login_prepare_response(client: reqwest::Client) -> Result<(String, String)> {
     let get_login_url = "http://passport.bilibili.com/qrcode/getLoginUrl";
     let resp = client
         .get(get_login_url)
@@ -25,6 +28,18 @@ pub async fn get_login_qr_code_url(client: reqwest::Client) -> Result<String> {
         .await?
         .json::<GetLoginQrCodeApiResponse>()
         .await?;
-    println!("{:#?}", resp.data.url);
-    Ok(resp.data.url)
+
+    let code = QrCode::new(&resp.data.url)?;
+    let qrcode = code
+        .render::<unicode::Dense1x2>()
+        .dark_color(unicode::Dense1x2::Light)
+        .light_color(unicode::Dense1x2::Dark)
+        .build();
+
+    println!("{:?}", resp.data);
+    Ok((qrcode, resp.data.oauthKey))
+}
+
+pub async fn polling_login_info(client: reqwest::Client, oauthKey: String) {
+    let get_login_url = "http://passport.bilibili.com/qrcode/getLoginInfo";
 }
