@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate serde_qs as qs;
+
 use crate::login::{get_login_prepare_response, polling_login_info};
 use anyhow::Result;
 // 错误处理
