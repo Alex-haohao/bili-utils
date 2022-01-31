@@ -3,6 +3,7 @@ use qrcode::render::unicode;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use dialoguer::Confirm;
 ////// ticker::tick
 use crate::login::GetLoginStatusResponseData::DataOk;
 use crossbeam::select;
@@ -10,9 +11,13 @@ use crossbeam_channel::after;
 use crossbeam_channel::tick;
 use crossbeam_channel::unbounded;
 use serde_json::Value;
-use std::thread;
+use std::{fs, thread};
 use std::time::{Duration, Instant};
 use url::{Host, Position, Url};
+use std::io::Write;
+use std::fs::OpenOptions;
+
+static UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_3 like Mac OS X) AppleWebKit/612.4.9.1.5 (KHTML, like Gecko) Mobile/21D49 BiliApp/65500100 os/ios model/iPad Pro 12.9-Inch 3G mobi_app/iphone_b build/65500100 osVer/15.3 network/2 channel/AppStore Buvid/Y556CB5651036FC351CAA1360C6FEB723795 c_locale/zh-Hans_CN s_locale/zh-Hans_CN sessionID/9a454e04 disable_rcmd/0";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetLoginQrCodeData {
@@ -39,9 +44,12 @@ pub enum GetLoginStatusResponseData {
 pub struct GetLoginStatusResponse {
     pub status: bool,
     pub data: GetLoginStatusResponseData,
-    pub message: String,
+    pub message:  Option<String>,
     pub ts: Option<i64>,
 }
+
+
+
 
 /*
 得到登录二维码的url
@@ -65,7 +73,7 @@ pub async fn get_login_prepare_response(client: &reqwest::Client) -> Result<(Str
     Ok((qrcode, resp.data.oauthKey))
 }
 
-pub async fn polling_login_info(client: &reqwest::Client, oauthKey: &String) -> Result<String> {
+pub async fn polling_login_info(client: &reqwest::Client, oauthKey: &String) -> Result<user_info_params> {
     let get_login_url = "http://passport.bilibili.com/qrcode/getLoginInfo";
     // 构造post_data
     let mut post_data = HashMap::new();
@@ -75,7 +83,6 @@ pub async fn polling_login_info(client: &reqwest::Client, oauthKey: &String) -> 
     let start = Instant::now();
     // 每一秒轮询一次
     let ticker = tick(Duration::from_millis(1000));
-    user_info_parse();
     loop {
         let msg = ticker.recv().unwrap();
         println!("{:?} elapsed: {:?}", msg, start.elapsed());
@@ -90,24 +97,98 @@ pub async fn polling_login_info(client: &reqwest::Client, oauthKey: &String) -> 
         if resp.status == true {
             if let DataOk { url } = resp.data {
                 let url = Url::parse(&url)?;
-                user_info_parse
+                let cookies =  handle_record_cookies(&url.query().expect("query"));
+                return Ok(cookies);
             }
         }
     }
 }
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
-struct user_info_params {
-    DedeUserID: i32,
-    DedeUserID__ckMd5: String,
-    Expires: i32,
-    SESSDATA: String,
-    bili_jct: String,
-    gourl: String,
+pub struct user_info_params {
+    pub DedeUserID: i32,  //UID
+    pub DedeUserID__ckMd5: String, //UID_Decode
+    pub Expires: i32,  //过期时间
+    pub SESSDATA: String, // Session
+    pub bili_jct: String, // JCT
+    pub gourl: String,
 }
 
-pub fn user_info_parse() {
-    let test_url = "DedeUserID=7884030&DedeUserID__ckMd5=fdfef5871e7ec555&Expires=15551000&SESSDATA=3ba06d44%2C1659088641%2C099c2%2A11&bili_jct=4e70e8e38075956d68caef48601a6621&gourl=http%3A%2F%2Fwww.bilibili.com";
-    let rec_params: user_info_params = qs::from_str(test_url).unwrap();
-    println!("{:?}", rec_params);
+// 解析用户信息 并写入文件
+pub fn handle_record_cookies(params:&str)-> user_info_params  {
+    let parsed_params: user_info_params = qs::from_str(params).expect("parse params");
+
+    // 删除过期的文件
+    let remove = fs::remove_file("bili_info.txt");
+    if let Err(e) = remove {
+    };
+
+    let mut f = OpenOptions::new()
+        .append(true)
+        .create(true) // Optionally create the file if it doesn't already exist
+        .open("bili_info.txt")
+        .expect("Unable to open/create file");
+
+    // 将用户信息写入文件
+    f.write_all(serde_json::to_string(&parsed_params).expect("serde_cookie").as_bytes()).expect("Unable to write cookies to file");
+    parsed_params
 }
+
+pub fn read_user_info_from_file () -> Result<user_info_params> {
+    let foo = fs::read_to_string("bili_info.txt");
+    match foo {
+        Ok(s) => {
+            let parsed_params: user_info_params = serde_json::from_str(&s).expect("parse params");
+            Ok(parsed_params)
+        },
+        Err(e) => {
+           Err(e.into())
+        }
+    }
+}
+
+
+
+/**
+ * 登录主流程：
+ * 1. 获取二维码
+ * 2. 开始轮询登录状态
+ * 3. 获取cookies
+ */
+pub async fn login() -> Result<user_info_params> {
+    let client = reqwest::ClientBuilder::new().user_agent(UA).build()?;
+    let qrcode = get_login_prepare_response(&client).await?;
+    let (qrcode, oauthKey) = qrcode;
+    println!("{}", qrcode);
+    // 开始轮询用户是否登录
+    let cookies = polling_login_info(&client, &oauthKey).await?;
+    Ok(cookies)
+}
+
+
+pub async fn check_login_status() -> Result<user_info_params> {
+    let read_user_data =  read_user_info_from_file();
+    match read_user_data {
+        // 如果本地有登录信息，则直接读取
+        Ok(cookies) => {
+            Ok(cookies)
+        },
+        Err(e) => {
+            // 如果本地没有登录信息，则需要登录
+            if Confirm::new()
+                .with_prompt("没有发现登录状态，是否选择登录账号？")
+                .interact()?
+            {
+                println!("请扫描二维码登录");
+                let cookies = login().await?;
+                println!("登录成功");
+                return Ok(cookies);
+            } else {
+                println!("即将退出程序");
+                std::process::exit(0);
+            }
+        }
+    }
+}
+
+
