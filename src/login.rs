@@ -17,7 +17,7 @@ use url::{Host, Position, Url};
 use std::io::Write;
 use std::fs::OpenOptions;
 
-static UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_3 like Mac OS X) AppleWebKit/612.4.9.1.5 (KHTML, like Gecko) Mobile/21D49 BiliApp/65500100 os/ios model/iPad Pro 12.9-Inch 3G mobi_app/iphone_b build/65500100 osVer/15.3 network/2 channel/AppStore Buvid/Y556CB5651036FC351CAA1360C6FEB723795 c_locale/zh-Hans_CN s_locale/zh-Hans_CN sessionID/9a454e04 disable_rcmd/0";
+pub static UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_3 like Mac OS X) AppleWebKit/612.4.9.1.5 (KHTML, like Gecko) Mobile/21D49 BiliApp/65500100 os/ios model/iPad Pro 12.9-Inch 3G mobi_app/iphone_b build/65500100 osVer/15.3 network/2 channel/AppStore Buvid/Y556CB5651036FC351CAA1360C6FEB723795 c_locale/zh-Hans_CN s_locale/zh-Hans_CN sessionID/9a454e04 disable_rcmd/0";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GetLoginQrCodeData {
