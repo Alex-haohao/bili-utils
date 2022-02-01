@@ -1,7 +1,5 @@
 use crate::login::UA;
 use crate::user_info_params;
-use anyhow::Result;
-use reqwest::Client;
 use std::collections::HashMap;
 
 pub fn parse_cookies(cookies: &user_info_params) -> String {

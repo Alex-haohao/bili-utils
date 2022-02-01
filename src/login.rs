@@ -1,22 +1,17 @@
-use anyhow::{anyhow, Result};
+use crate::client::parse_cookies;
+use crate::login::GetLoginStatusResponseData::DataOk;
+use anyhow::Result;
+use crossbeam_channel::tick;
 use dialoguer::Confirm;
 use qrcode::render::unicode;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-////// ticker::tick
-use crate::client::parse_cookies;
-use crate::login::GetLoginStatusResponseData::DataOk;
-use crossbeam::select;
-use crossbeam_channel::after;
-use crossbeam_channel::tick;
-use crossbeam_channel::unbounded;
-use serde_json::Value;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::time::{Duration, Instant};
 use std::{fs, process, thread};
-use url::{Host, Position, Url};
+use url::Url;
 
 pub static UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_3 like Mac OS X) AppleWebKit/612.4.9.1.5 (KHTML, like Gecko) Mobile/21D49 BiliApp/65500100 os/ios model/iPad Pro 12.9-Inch 3G mobi_app/iphone_b build/65500100 osVer/15.3 network/2 channel/AppStore Buvid/Y556CB5651036FC351CAA1360C6FEB723795 c_locale/zh-Hans_CN s_locale/zh-Hans_CN sessionID/9a454e04 disable_rcmd/0";
 
@@ -218,8 +213,6 @@ pub async fn test_login_status(cookies: user_info_params) -> Result<user_info_pa
         .await?
         .json::<NavResponse>()
         .await;
-
-    println!("{:?}", resp);
 
     if let Ok(resp) = resp {
         if resp.data.isLogin {
