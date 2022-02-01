@@ -78,6 +78,7 @@ dependencies = [
  "crossbeam-channel",
  "dialoguer",
  "futures",
+ "lazy_static",
  "num_cpus",
  "qrcode",
  "reqwest",

@@ -1,21 +1,22 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use dialoguer::Confirm;
 use qrcode::render::unicode;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use dialoguer::Confirm;
 ////// ticker::tick
+use crate::client::parse_cookies;
 use crate::login::GetLoginStatusResponseData::DataOk;
 use crossbeam::select;
 use crossbeam_channel::after;
 use crossbeam_channel::tick;
 use crossbeam_channel::unbounded;
 use serde_json::Value;
-use std::{fs, thread};
-use std::time::{Duration, Instant};
-use url::{Host, Position, Url};
-use std::io::Write;
 use std::fs::OpenOptions;
+use std::io::Write;
+use std::time::{Duration, Instant};
+use std::{fs, process, thread};
+use url::{Host, Position, Url};
 
 pub static UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_3 like Mac OS X) AppleWebKit/612.4.9.1.5 (KHTML, like Gecko) Mobile/21D49 BiliApp/65500100 os/ios model/iPad Pro 12.9-Inch 3G mobi_app/iphone_b build/65500100 osVer/15.3 network/2 channel/AppStore Buvid/Y556CB5651036FC351CAA1360C6FEB723795 c_locale/zh-Hans_CN s_locale/zh-Hans_CN sessionID/9a454e04 disable_rcmd/0";
 
@@ -44,12 +45,9 @@ pub enum GetLoginStatusResponseData {
 pub struct GetLoginStatusResponse {
     pub status: bool,
     pub data: GetLoginStatusResponseData,
-    pub message:  Option<String>,
+    pub message: Option<String>,
     pub ts: Option<i64>,
 }
-
-
-
 
 /*
 得到登录二维码的url
@@ -73,7 +71,10 @@ pub async fn get_login_prepare_response(client: &reqwest::Client) -> Result<(Str
     Ok((qrcode, resp.data.oauthKey))
 }
 
-pub async fn polling_login_info(client: &reqwest::Client, oauthKey: &String) -> Result<user_info_params> {
+pub async fn polling_login_info(
+    client: &reqwest::Client,
+    oauthKey: &String,
+) -> Result<user_info_params> {
     let get_login_url = "http://passport.bilibili.com/qrcode/getLoginInfo";
     // 构造post_data
     let mut post_data = HashMap::new();
@@ -97,7 +98,7 @@ pub async fn polling_login_info(client: &reqwest::Client, oauthKey: &String) -> 
         if resp.status == true {
             if let DataOk { url } = resp.data {
                 let url = Url::parse(&url)?;
-                let cookies =  handle_record_cookies(&url.query().expect("query"));
+                let cookies = handle_record_cookies(&url.query().expect("query"));
                 return Ok(cookies);
             }
         }
@@ -106,22 +107,21 @@ pub async fn polling_login_info(client: &reqwest::Client, oauthKey: &String) -> 
 
 #[derive(Debug, PartialEq, Deserialize, Serialize)]
 pub struct user_info_params {
-    pub DedeUserID: i32,  //UID
+    pub DedeUserID: i32,           //UID
     pub DedeUserID__ckMd5: String, //UID_Decode
-    pub Expires: i32,  //过期时间
-    pub SESSDATA: String, // Session
-    pub bili_jct: String, // JCT
+    pub Expires: i32,              //过期时间
+    pub SESSDATA: String,          // Session
+    pub bili_jct: String,          // JCT
     pub gourl: String,
 }
 
 // 解析用户信息 并写入文件
-pub fn handle_record_cookies(params:&str)-> user_info_params  {
+pub fn handle_record_cookies(params: &str) -> user_info_params {
     let parsed_params: user_info_params = qs::from_str(params).expect("parse params");
 
     // 删除过期的文件
     let remove = fs::remove_file("bili_info.txt");
-    if let Err(e) = remove {
-    };
+    if let Err(e) = remove {};
 
     let mut f = OpenOptions::new()
         .append(true)
@@ -130,24 +130,25 @@ pub fn handle_record_cookies(params:&str)-> user_info_params  {
         .expect("Unable to open/create file");
 
     // 将用户信息写入文件
-    f.write_all(serde_json::to_string(&parsed_params).expect("serde_cookie").as_bytes()).expect("Unable to write cookies to file");
+    f.write_all(
+        serde_json::to_string(&parsed_params)
+            .expect("serde_cookie")
+            .as_bytes(),
+    )
+    .expect("Unable to write cookies to file");
     parsed_params
 }
 
-pub fn read_user_info_from_file () -> Result<user_info_params> {
+pub fn read_user_info_from_file() -> Result<user_info_params> {
     let foo = fs::read_to_string("bili_info.txt");
     match foo {
         Ok(s) => {
             let parsed_params: user_info_params = serde_json::from_str(&s).expect("parse params");
             Ok(parsed_params)
-        },
-        Err(e) => {
-           Err(e.into())
         }
+        Err(e) => Err(e.into()),
     }
 }
-
-
 
 /**
  * 登录主流程：
@@ -165,14 +166,11 @@ pub async fn login() -> Result<user_info_params> {
     Ok(cookies)
 }
 
-
 pub async fn check_login_status() -> Result<user_info_params> {
-    let read_user_data =  read_user_info_from_file();
+    let read_user_data = read_user_info_from_file();
     match read_user_data {
         // 如果本地有登录信息，则直接读取
-        Ok(cookies) => {
-            Ok(cookies)
-        },
+        Ok(cookies) => Ok(cookies),
         Err(e) => {
             // 如果本地没有登录信息，则需要登录
             if Confirm::new()
@@ -191,4 +189,58 @@ pub async fn check_login_status() -> Result<user_info_params> {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NavResponseData {
+    isLogin: bool,
+}
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NavResponse {
+    pub code: i32,
+    pub data: NavResponseData,
+    pub message: String,
+}
+
+/**
+ * 测试登录状态/cookies有效性
+ */
+pub async fn test_login_status(cookies: user_info_params) -> Result<user_info_params> {
+    let client = reqwest::ClientBuilder::new()
+        .cookie_store(true)
+        .user_agent(UA)
+        .build()?;
+    let cookies_header = parse_cookies(&cookies);
+    let url = "https://api.bilibili.com/x/web-interface/nav";
+    let resp = client
+        .get(url)
+        .header("cookie", cookies_header)
+        .send()
+        .await?
+        .json::<NavResponse>()
+        .await;
+
+    println!("{:?}", resp);
+
+    if let Ok(resp) = resp {
+        if resp.data.isLogin {
+            println!("登录成功");
+        } else {
+            if Confirm::new()
+                .with_prompt("登录状态已失效，是否重新登录？")
+                .interact()?
+            {
+                println!("请扫描二维码登录");
+                let cookies = login().await?;
+                println!("登录成功");
+                return Ok(cookies);
+            } else {
+                println!("即将退出程序");
+                std::process::exit(0);
+            }
+        }
+    } else {
+        process::exit(0);
+    }
+
+    Ok(cookies)
+}
