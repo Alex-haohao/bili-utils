@@ -1,21 +1,17 @@
 use crate::bili_resp::suit_all::SuitAllResp;
+use crate::bili_resp::suit_detail::SuitDetailResp;
 use crate::client::parse_cookies;
 use crate::login::UA;
 use crate::user_info_params;
+use crate::utils::get_bili_server_time;
 use anyhow::Result;
+use chrono::{Local, Utc};
 use console::Term;
 use crossbeam_channel::tick;
 use dialoguer::Confirm;
-use dialoguer::{theme::ColorfulTheme, Select};
-use qrcode::render::unicode;
-use qrcode::QrCode;
+use dialoguer::{theme::ColorfulTheme, Input, Select};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::time::{Duration, Instant};
-use std::{fs, process, thread};
-use url::Url;
+use serde_json::Value;
 
 pub async fn checking_all_selling(cookies: &user_info_params) -> Result<SuitAllResp> {
     let client = reqwest::ClientBuilder::new()
@@ -98,6 +94,63 @@ pub async fn checking_all_selling(cookies: &user_info_params) -> Result<SuitAllR
             None => println!("无法选择分类"),
         }
     }
-
     Ok(resp)
+}
+
+pub async fn buy_suit(cookies: &user_info_params) -> Result<()> {
+    // 第一步 用户输入要购买的装扮id
+
+    //测试一下本地时间和bilibili服务器的时间差距
+    let server_time = get_bili_server_time().await?;
+    let local_time = Utc::now().timestamp();
+    if server_time == local_time {
+        println!("本地时间和bilibili服务器时间一致");
+    } else {
+    }
+    println!("{}", server_time);
+    println!("{}", local_time);
+
+    //输入要购买的装扮id
+    let suit_id: String = Input::new()
+        .with_prompt("请输入要购买的装扮id")
+        .with_initial_text("")
+        .default("No".into())
+        .interact_text()?;
+
+    let suit_id = suit_id.parse::<i32>();
+    if suit_id.is_err() {
+        println!("输入的装扮id不合法");
+        return Ok(());
+    }
+    let suit_id = suit_id.expect("输入的装扮id不合法");
+    let res = get_suit_detail(cookies, suit_id).await;
+    if let Err(e) = res {
+        println!("装扮id检索出错");
+        return Ok(());
+    }
+
+    Ok(())
+}
+
+// pub async fn count_down {
+//     let (tx, rx) = tick(1);
+//     let mut count = 0;
+//     loop {
+//         let _ = rx.recv().await;
+//         count += 1;
+//         println!("{}", count);
+//     }
+// }
+
+pub async fn get_suit_detail(cookies: &user_info_params, suit_id: i32) -> Result<SuitDetailResp> {
+    let client = reqwest::Client::new();
+    let res = client
+        .get("https://api.bilibili.com/x/garb/mall/item/suit/v2")
+        .query(&[("part", "suit"), ("item_id", &suit_id.to_string())])
+        .header("cookie", parse_cookies(cookies))
+        .send()
+        .await?
+        .json::<SuitDetailResp>()
+        .await?;
+    Ok(res)
 }

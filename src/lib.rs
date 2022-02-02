@@ -8,7 +8,7 @@ use crate::login::{
     get_login_prepare_response, polling_login_info, read_user_info_from_file, test_login_status,
     user_info_params,
 };
-use crate::suit::checking_all_selling;
+use crate::suit::{buy_suit, checking_all_selling};
 use anyhow::Result;
 // 错误处理
 use dialoguer::Confirm;
@@ -27,6 +27,7 @@ mod header;
 pub mod login;
 mod suit;
 mod ticker;
+mod utils;
 
 /**
  * 主流程
@@ -57,6 +58,7 @@ pub async fn main_process() -> Result<()> {
                         handle_check_all_suit(&cookies).await?;
                     } else {
                         // 抢购装扮
+                        buy_suit(&cookies).await?;
                     }
                 }
                 None => println!("没有选择，退出程序"),
@@ -70,6 +72,6 @@ pub async fn main_process() -> Result<()> {
 }
 
 pub async fn handle_check_all_suit(cookies: &user_info_params) -> Result<()> {
-    checking_all_selling(cookies).await;
+    checking_all_selling(cookies).await?;
     Ok(())
 }
