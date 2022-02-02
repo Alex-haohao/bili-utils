@@ -126,7 +126,26 @@ pub async fn buy_suit(cookies: &user_info_params) -> Result<()> {
     let res = get_suit_detail(cookies, suit_id).await;
     if let Err(e) = res {
         println!("装扮id检索出错");
+        print!("{}", e);
         return Ok(());
+    }
+    let res = res.unwrap();
+    if (res.data.sale_surplus <= 0) {
+        println!("装扮未查询或已售罄");
+        return Ok(());
+    }
+
+    // 预购装扮购买
+    if res.data.item.properties.is_some() {
+        let suit_properties = res.data.item.properties.clone().unwrap();
+        // 装扮已开卖
+        if server_time > suit_properties.sale_time_begin.parse::<i64>().unwrap() {
+            println!("装扮已开卖");
+        } else {
+            //装扮未开卖
+            println!("装扮未开卖");
+            handle_pre_sale(cookies, &res).await;
+        }
     }
 
     Ok(())
@@ -141,6 +160,19 @@ pub async fn buy_suit(cookies: &user_info_params) -> Result<()> {
 //         println!("{}", count);
 //     }
 // }
+
+/**
+ * 处理预购的装扮
+ */
+pub async fn handle_pre_sale(cookies: &user_info_params, suit_detail: &SuitDetailResp) {
+    let suit_properties = suit_detail.data.item.properties.clone().unwrap();
+    let sale_time_begin = suit_properties.sale_time_begin.parse::<i64>().unwrap();
+    let sale_quantity = suit_properties.sale_quantity.parse::<i64>().unwrap();
+    let sale_surplus = suit_detail.data.sale_surplus;
+    //当前编号
+    let next_number = sale_quantity - sale_surplus + 1;
+    println!("{}", next_number);
+}
 
 pub async fn get_suit_detail(cookies: &user_info_params, suit_id: i32) -> Result<SuitDetailResp> {
     let client = reqwest::Client::new();

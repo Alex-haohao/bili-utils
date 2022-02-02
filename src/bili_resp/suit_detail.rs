@@ -44,8 +44,6 @@ pub struct Item {
     pub sale_left_time: i64,
     #[serde(rename = "sale_time_end")]
     pub sale_time_end: i64,
-    #[serde(rename = "sale_surplus")]
-    pub sale_surplus: i64,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
