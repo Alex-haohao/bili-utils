@@ -10,8 +10,11 @@ use console::Term;
 use crossbeam_channel::tick;
 use dialoguer::Confirm;
 use dialoguer::{theme::ColorfulTheme, Input, Select};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 pub async fn checking_all_selling(cookies: &user_info_params) -> Result<SuitAllResp> {
     let client = reqwest::ClientBuilder::new()
@@ -151,20 +154,96 @@ pub async fn buy_suit(cookies: &user_info_params) -> Result<()> {
     Ok(())
 }
 
-// pub async fn count_down {
-//     let (tx, rx) = tick(1);
-//     let mut count = 0;
-//     loop {
-//         let _ = rx.recv().await;
-//         count += 1;
-//         println!("{}", count);
-//     }
-// }
+pub async fn handle_buy_suit(cookies: &user_info_params) -> Result<()> {
+    let test_suit = get_suit_detail(cookies, 33960).await?;
+    let suit_id = test_suit.data.item.item_id;
+    let client = reqwest::ClientBuilder::new().cookie_store(true).build()?;
+    let headers = construct_headers(cookies);
+    // 1. create-order 创建订单
+    let new_order = create_order(cookies, &headers, &client, 1, 1, suit_id).await?;
+    // if new_order.code != 0 {
+    //     println!("{}", new_order.message);
+    //     return Ok(());
+    // }
+    // 2. confirm-order 确认订单
+    // 每200ms轮询一次
+    let ticker = tick(Duration::from_millis(200));
+    loop {
+        ticker.recv().unwrap();
+        let confirmed_order =
+            confirm_order(cookies, &headers, &client, &new_order.data.order_id).await?;
+        if confirmed_order.code != 0 {
+            println!("{}", confirmed_order.message);
+            return Ok(());
+        }
+        if confirmed_order.data.expect("订单确认失败").state == "created" {
+            println!("订单创建成功");
+            break;
+        }
+    }
+    Ok(())
+}
+
+// 创建订单
+pub async fn create_order(
+    cookies: &user_info_params,
+    headers: &reqwest::header::HeaderMap,
+    client: &Client,
+    add_month: u32,
+    buy_num: u32,
+    item_id: i64,
+) -> Result<CreateOrderResp> {
+    let mut post_data = HashMap::new();
+    post_data.insert("add_month", add_month.to_string());
+    post_data.insert("buy_num", buy_num.to_string());
+    post_data.insert("csrf", cookies.bili_jct.clone());
+    post_data.insert("hasBiliapp", true.to_string());
+    post_data.insert("currency", "bp".to_string());
+    post_data.insert("item_id", item_id.to_string());
+    post_data.insert("platform", "ios".to_string());
+
+    let res = client
+        .post("https://api.bilibili.com/x/garb/trade/create")
+        .headers(headers.clone())
+        .form(&post_data)
+        .send()
+        .await?
+        .json::<CreateOrderResp>()
+        .await?;
+
+    Ok(res)
+}
+
+// 确认订单 ConfirmOrder
+pub async fn confirm_order(
+    cookies: &user_info_params,
+    headers: &reqwest::header::HeaderMap,
+    client: &Client,
+    order_id: &String,
+) -> Result<ConfirmOrderResp> {
+    let mut post_data = HashMap::new();
+    post_data.insert("csrf", cookies.bili_jct.clone());
+    post_data.insert("order_id", "123".to_string());
+
+    let res = client
+        .post("https://api.bilibili.com/x/garb/trade/confirm")
+        .headers(headers.clone())
+        .form(&post_data)
+        .send()
+        .await?
+        .json::<ConfirmOrderResp>()
+        .await?;
+
+    Ok(res)
+}
 
 /**
  * 处理预购的装扮
  */
-pub async fn handle_pre_sale(cookies: &user_info_params, suit_detail: &SuitDetailResp) {
+pub async fn handle_pre_sale(
+    cookies: &user_info_params,
+    suit_detail: &SuitDetailResp,
+) -> Result<()> {
     let suit_properties = suit_detail.data.item.properties.clone().unwrap();
     let sale_time_begin = suit_properties.sale_time_begin.parse::<i64>().unwrap();
     let sale_quantity = suit_properties.sale_quantity.parse::<i64>().unwrap();
@@ -172,6 +251,11 @@ pub async fn handle_pre_sale(cookies: &user_info_params, suit_detail: &SuitDetai
     //当前编号
     let next_number = sale_quantity - sale_surplus + 1;
     println!("{}", next_number);
+    //计算倒计时
+    let mut count_down = sale_time_begin - get_bili_server_time().await?;
+    println!("{}", count_down);
+
+    Ok(())
 }
 
 pub async fn get_suit_detail(cookies: &user_info_params, suit_id: i32) -> Result<SuitDetailResp> {
@@ -185,4 +269,45 @@ pub async fn get_suit_detail(cookies: &user_info_params, suit_id: i32) -> Result
         .json::<SuitDetailResp>()
         .await?;
     Ok(res)
+}
+
+// 创建 header
+use crate::bili_resp::confirm_order::ConfirmOrderResp;
+use crate::bili_resp::create_order::CreateOrderResp;
+use reqwest::header::{
+    HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CONNECTION, CONTENT_TYPE,
+    REFERER, USER_AGENT,
+};
+
+fn construct_headers(cookies: &user_info_params) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        ACCEPT_ENCODING,
+        HeaderValue::from_static("gzip, deflate, br"),
+    );
+    headers.insert(USER_AGENT, HeaderValue::from_static(UA));
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/x-www-form-urlencoded"),
+    );
+    headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+    headers.insert(
+        ACCEPT_LANGUAGE,
+        HeaderValue::from_static("zh-CN,zh-Hans;q=0.9"),
+    );
+    headers.insert(
+        REFERER,
+        HeaderValue::from_static("https://www.bilibili.com/h5/mall/suit/detail"),
+    );
+    headers.insert(
+        "X-CSRF-TOKEN",
+        cookies.bili_jct.clone().parse().expect("解析cookies失败"),
+    );
+    headers.insert(
+        "Cookie",
+        parse_cookies(cookies.clone())
+            .parse()
+            .expect("解析cookies失败"),
+    );
+    headers
 }

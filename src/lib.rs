@@ -8,7 +8,7 @@ use crate::login::{
     get_login_prepare_response, polling_login_info, read_user_info_from_file, test_login_status,
     user_info_params,
 };
-use crate::suit::{buy_suit, checking_all_selling};
+use crate::suit::{buy_suit, checking_all_selling, handle_buy_suit};
 use anyhow::Result;
 // 错误处理
 use dialoguer::Confirm;
@@ -38,7 +38,7 @@ pub async fn main_process() -> Result<()> {
         // 获取cookies成功，测试是否能够登录
         let cookies = test_login_status(cookies).await?;
 
-        let mut init_select = vec!["检查当前售卖装扮", "抢购装扮"];
+        let mut init_select = vec!["检查当前售卖装扮", "抢购装扮", "直接购买-测试"];
         init_select.push("退出程序");
 
         loop {
@@ -56,9 +56,12 @@ pub async fn main_process() -> Result<()> {
                     if index == 0 {
                         // 检查当前售卖装扮
                         handle_check_all_suit(&cookies).await?;
-                    } else {
+                    } else if index == 1 {
                         // 抢购装扮
                         buy_suit(&cookies).await?;
+                    } else {
+                        // 直接购买-测试
+                        handle_buy_suit(&cookies).await?;
                     }
                 }
                 None => println!("没有选择，退出程序"),
