@@ -1,5 +1,7 @@
+extern crate rand;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -30,4 +32,22 @@ pub async fn get_bili_server_time() -> Result<i64> {
     } else {
         Ok(Utc::now().timestamp())
     }
+}
+
+pub fn random_id(PASSWORD_LEN: u32, long: bool) -> String {
+    let mut charset: &[u8] = b"0123456789abcdef";
+    if long {
+        charset = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    }
+    let mut rng = rand::thread_rng();
+
+    let password: String = (0..PASSWORD_LEN)
+        .map(|_| {
+            let idx = rng.gen_range(0..charset.len());
+            charset[idx] as char
+        })
+        .collect();
+
+    println!("{:?}", password);
+    password
 }

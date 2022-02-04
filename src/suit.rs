@@ -1,9 +1,9 @@
 use crate::bili_resp::suit_all::SuitAllResp;
 use crate::bili_resp::suit_detail::SuitDetailResp;
 use crate::client::parse_cookies;
-use crate::login::UA;
 use crate::user_info_params;
 use crate::utils::get_bili_server_time;
+use crate::utils::random_id;
 use anyhow::Result;
 use chrono::{Local, Utc};
 use console::Term;
@@ -16,10 +16,37 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+lazy_static! {
+    #[derive(Debug)]
+static ref Buvid: String = random_id(37, true);
+    #[derive(Debug)]
+static ref device_id: String = random_id(38, true);
+    #[derive(Debug)]
+static ref fp_local: String = random_id(64, false);
+    #[derive(Debug)]
+static ref fp_remove: String = random_id(64, false);
+    #[derive(Debug)]
+static ref deviceFingerprint: String = random_id(32, true);
+    #[derive(Debug)]
+static ref BiliApp: String = "65500100".parse().unwrap();
+    #[derive(Debug)]
+static ref mobiApp: String = "iphone_b".parse().unwrap();
+    #[derive(Debug)]
+static ref buildId: String = "65500100".parse().unwrap();
+    #[derive(Debug)]
+static ref c_locale: String = "zh-Hans_CN".parse().unwrap();
+    #[derive(Debug)]
+static ref s_locale: String = "zh-Hans_CN".parse().unwrap();
+    #[derive(Debug)]
+static ref session_id: String = random_id(8, false);
+static ref UA: String = format!("Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X) AppleWebKit/612.3.6.1.6 (KHTML, like Gecko) Mobile/21C52 BiliApp/{} os/ios model/iPad Pro 12.9-Inch 3G mobi_app/{} build/{} osVer/15.2 network/2 channel/AppStore Buvid/{} c_locale/{} s_locale/{} sessionID/{} disable_rcmd/0",*BiliApp,*mobiApp,*buildId,*Buvid,*c_locale,*s_locale,*session_id);
+}
+
 pub async fn checking_all_selling(cookies: &user_info_params) -> Result<SuitAllResp> {
+    println!("{:?}", &*UA);
     let client = reqwest::ClientBuilder::new()
         .cookie_store(true)
-        .user_agent(UA)
+        .user_agent(&*UA)
         .build()?;
     let cookies_header = parse_cookies(cookies);
     let url = "https://api.bilibili.com/x/garb/mall/suit/all";
@@ -102,7 +129,6 @@ pub async fn checking_all_selling(cookies: &user_info_params) -> Result<SuitAllR
 
 pub async fn buy_suit(cookies: &user_info_params) -> Result<()> {
     // 第一步 用户输入要购买的装扮id
-
     //测试一下本地时间和bilibili服务器的时间差距
     let server_time = get_bili_server_time().await?;
     let local_time = Utc::now().timestamp();
@@ -165,6 +191,7 @@ pub async fn handle_buy_suit(cookies: &user_info_params) -> Result<()> {
     //     println!("{}", new_order.message);
     //     return Ok(());
     // }
+
     // 2. confirm-order 确认订单
     // 每200ms轮询一次
     let ticker = tick(Duration::from_millis(200));
@@ -237,6 +264,29 @@ pub async fn confirm_order(
     Ok(res)
 }
 
+//支付
+pub async fn pay_pay(
+    cookies: &user_info_params,
+    headers: &reqwest::header::HeaderMap,
+    client: &Client,
+    order_id: &String,
+) -> Result<ConfirmOrderResp> {
+    let mut post_data = HashMap::new();
+    post_data.insert("csrf", cookies.bili_jct.clone());
+    post_data.insert("order_id", "123".to_string());
+
+    let res = client
+        .post("https://pay.bilibili.com/payplatform/pay/pay")
+        .headers(headers.clone())
+        .form(&post_data)
+        .send()
+        .await?
+        .json::<ConfirmOrderResp>()
+        .await?;
+
+    Ok(res)
+}
+
 /**
  * 处理预购的装扮
  */
@@ -285,7 +335,7 @@ fn construct_headers(cookies: &user_info_params) -> HeaderMap {
         ACCEPT_ENCODING,
         HeaderValue::from_static("gzip, deflate, br"),
     );
-    headers.insert(USER_AGENT, HeaderValue::from_static(UA));
+    headers.insert(USER_AGENT, HeaderValue::from_static(&*UA));
     headers.insert(
         CONTENT_TYPE,
         HeaderValue::from_static("application/x-www-form-urlencoded"),
@@ -311,3 +361,55 @@ fn construct_headers(cookies: &user_info_params) -> HeaderMap {
     );
     headers
 }
+
+// fn construct_pay_headers(cookies: &user_info_params) -> HeaderMap {
+//     let mut headers = HeaderMap::new();
+//     headers.insert(
+//         ACCEPT_ENCODING,
+//         HeaderValue::from_static("gzip, deflate, br"),
+//     );
+//     headers.insert(USER_AGENT, HeaderValue::from_static(UA));
+//     headers.insert(
+//         CONTENT_TYPE,
+//         HeaderValue::from_static("application/x-www-form-urlencoded"),
+//     );
+//     headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+//     headers.insert(
+//         ACCEPT_LANGUAGE,
+//         HeaderValue::from_static("zh-CN,zh-Hans;q=0.9"),
+//     );
+//     headers.insert(
+//         REFERER,
+//         HeaderValue::from_static("https://www.bilibili.com/h5/mall/suit/detail"),
+//     );
+//     headers.insert(
+//         "Cookie",
+//         parse_cookies(cookies.clone())
+//             .parse()
+//             .expect("解析cookies失败"),
+//     );
+//     headers.insert(
+//         "cLocale",
+//         "zh_CN".parse().expect("解析cLocale失败"),
+//     );
+//     headers.insert(
+//         "sLocale",
+//         "zh_CN".parse().expect("解析sLocale失败"),
+//     );
+//     headers.insert(
+//         "Buvid",
+//         cookies..clone().parse().expect("解析Buvid失败"),
+//     );
+//     "Buvid": Buvid,
+//     "Device-ID": device_id,
+//     "fp_local": fp_local,
+//     "fp_remote": fp_remove,
+//     "session_id": session_id,
+//     "deviceFingerprint": devicefingerprint,
+//     "buildId": appVer,
+//     "env": "prod",
+//     "APP-KEY": "android",
+//     "User-Agent": pay_User_Agent,
+//     "bili-bridge-engine": "cronet",
+//     headers
+// }
