@@ -48,6 +48,5 @@ pub fn random_id(PASSWORD_LEN: u32, long: bool) -> String {
         })
         .collect();
 
-    println!("{:?}", password);
     password
 }

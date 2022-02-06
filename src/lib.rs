@@ -8,7 +8,7 @@ use crate::login::{
     get_login_prepare_response, polling_login_info, read_user_info_from_file, test_login_status,
     user_info_params,
 };
-use crate::suit::{buy_suit, checking_all_selling, handle_buy_suit};
+use crate::suit::{buy_suit, checking_all_selling, construct_pay_headers, handle_buy_suit};
 use crate::utils::random_id;
 use anyhow::Result;
 // 错误处理
@@ -64,7 +64,8 @@ pub async fn main_process() -> Result<()> {
                         // 直接购买-测试
                         handle_buy_suit(&cookies).await?;
                     } else {
-                        random_id(12, true);
+                        println!("{}", "暂未开放");
+                        // construct_pay_headers(&cookies);
                     }
                 }
                 None => println!("没有选择，退出程序"),

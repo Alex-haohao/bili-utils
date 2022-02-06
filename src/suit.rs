@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 
 lazy_static! {
     #[derive(Debug)]
-static ref Buvid: String = random_id(37, true);
+static ref buvid: String = "4069f7a0af9623e13a283c456eaf403".to_string();
+      #[derive(Debug)]
+static ref accessKey: String = random_id(32, false);
     #[derive(Debug)]
 static ref device_id: String = random_id(38, true);
     #[derive(Debug)]
@@ -26,24 +28,22 @@ static ref fp_local: String = random_id(64, false);
     #[derive(Debug)]
 static ref fp_remove: String = random_id(64, false);
     #[derive(Debug)]
-static ref deviceFingerprint: String = random_id(32, true);
+static ref deviceFingerprint: String = "a009263b4e8fd4e82140f22055d53ac9".to_string();
     #[derive(Debug)]
-static ref BiliApp: String = "65500100".parse().unwrap();
+static ref BiliApp: String = "6560300".parse().unwrap();
     #[derive(Debug)]
-static ref mobiApp: String = "iphone_b".parse().unwrap();
+static ref mobiapp: String = "iphone".parse().unwrap();
     #[derive(Debug)]
-static ref buildId: String = "65500100".parse().unwrap();
+static ref buildId: String = "65800100".parse().unwrap();
     #[derive(Debug)]
 static ref c_locale: String = "zh-Hans_CN".parse().unwrap();
     #[derive(Debug)]
 static ref s_locale: String = "zh-Hans_CN".parse().unwrap();
     #[derive(Debug)]
 static ref session_id: String = random_id(8, false);
-static ref UA: String = format!("Mozilla/5.0 (iPhone; CPU iPhone OS 15_2 like Mac OS X) AppleWebKit/612.3.6.1.6 (KHTML, like Gecko) Mobile/21C52 BiliApp/{} os/ios model/iPad Pro 12.9-Inch 3G mobi_app/{} build/{} osVer/15.2 network/2 channel/AppStore Buvid/{} c_locale/{} s_locale/{} sessionID/{} disable_rcmd/0",*BiliApp,*mobiApp,*buildId,*Buvid,*c_locale,*s_locale,*session_id);
-}
+static ref UA: String = format!("Mozilla/5.0 (Linux; Android 10; HLK-AL10 Build/HONORHLK-AL10; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/76.0.3809.89 Mobile Safari/537.36 T7/12.6 SP-engine/2.26.0 baiduboxapp/12.6.0.10 (Baidu; P1 10) NABar/1.0 BiliApp/{} os/ios model/iPad Pro 12.9-Inch 3G mobi_app/{} build/{} osVer/15.2 network/2 channel/AppStore buvid/{} c_locale/{} s_locale/{} sessionID/{} disable_rcmd/0",*BiliApp,*mobiapp,*buildId,*buvid,*c_locale,*s_locale,*session_id);}
 
 pub async fn checking_all_selling(cookies: &user_info_params) -> Result<SuitAllResp> {
-    println!("{:?}", &*UA);
     let client = reqwest::ClientBuilder::new()
         .cookie_store(true)
         .user_agent(&*UA)
@@ -181,33 +181,60 @@ pub async fn buy_suit(cookies: &user_info_params) -> Result<()> {
 }
 
 pub async fn handle_buy_suit(cookies: &user_info_params) -> Result<()> {
-    let test_suit = get_suit_detail(cookies, 33960).await?;
+    let test_suit = get_suit_detail(cookies, 34151).await?;
     let suit_id = test_suit.data.item.item_id;
     let client = reqwest::ClientBuilder::new().cookie_store(true).build()?;
-    let headers = construct_headers(cookies);
+    let headers = construct_headers(cookies, &suit_id);
+    let pay_header = construct_pay_headers(cookies);
+
     // 1. create-order 创建订单
     let new_order = create_order(cookies, &headers, &client, 1, 1, suit_id).await?;
-    // if new_order.code != 0 {
-    //     println!("{}", new_order.message);
-    //     return Ok(());
-    // }
+    if new_order.code != 0 {
+        println!("{}", new_order.message);
+        return Ok(());
+    }
 
     // 2. confirm-order 确认订单
     // 每200ms轮询一次
     let ticker = tick(Duration::from_millis(200));
+    let mut confirmed_order = Default::default();
     loop {
         ticker.recv().unwrap();
-        let confirmed_order =
+        confirmed_order =
             confirm_order(cookies, &headers, &client, &new_order.data.order_id).await?;
         if confirmed_order.code != 0 {
-            println!("{}", confirmed_order.message);
             return Ok(());
         }
-        if confirmed_order.data.expect("订单确认失败").state == "created" {
+        if confirmed_order.data.clone().expect("订单确认失败").state == "created" {
             println!("订单创建成功");
             break;
         }
     }
+
+    //3. 支付订单
+    let pay_order_res = pay_pay(&pay_header, &client, confirmed_order).await?;
+    if pay_order_res.code != None && pay_order_res.code.expect("无法获取返回code") == 0 {
+        println!("{}", pay_order_res.msg);
+    } else {
+        println!("{}", pay_order_res.msg);
+        return Ok(());
+    }
+
+    //4. 查询支付状态
+    let ticker = tick(Duration::from_millis(200));
+    loop {
+        ticker.recv().unwrap();
+        let pay_status = query_pay(cookies, &client, &new_order.data.order_id).await?;
+        if pay_status.code != 0 {
+            println!("{}", pay_status.message);
+            return Ok(());
+        }
+        if pay_status.data.expect("查询支付状态失败").state == "paid" {
+            println!("支付成功");
+            break;
+        }
+    }
+
     Ok(())
 }
 
@@ -250,7 +277,7 @@ pub async fn confirm_order(
 ) -> Result<ConfirmOrderResp> {
     let mut post_data = HashMap::new();
     post_data.insert("csrf", cookies.bili_jct.clone());
-    post_data.insert("order_id", "123".to_string());
+    post_data.insert("order_id", order_id.to_string());
 
     let res = client
         .post("https://api.bilibili.com/x/garb/trade/confirm")
@@ -264,24 +291,115 @@ pub async fn confirm_order(
     Ok(res)
 }
 
+use serde_json::{Map, Number};
+
 //支付
 pub async fn pay_pay(
-    cookies: &user_info_params,
     headers: &reqwest::header::HeaderMap,
     client: &Client,
-    order_id: &String,
-) -> Result<ConfirmOrderResp> {
-    let mut post_data = HashMap::new();
-    post_data.insert("csrf", cookies.bili_jct.clone());
-    post_data.insert("order_id", "123".to_string());
+    orderDetail: ConfirmOrderResp,
+) -> Result<PayOrderResp> {
+    let mut post_data = Map::new();
+    let pay_data = orderDetail.data.expect("获取paydata失败");
+    let pay_data_json: PayDataResp = serde_json::from_str(pay_data.pay_data.as_str())?;
+
+    post_data.insert(
+        "originalAmount".to_string(),
+        Value::String(pay_data_json.original_amount.to_string()),
+    );
+    post_data.insert(
+        "orderCreateTime".to_string(),
+        Value::String(pay_data_json.order_create_time.to_string()),
+    );
+
+    post_data.insert(
+        "showTitle".to_string(),
+        Value::String(pay_data_json.show_title.to_string()),
+    );
+    post_data.insert(
+        "deviceType".to_string(),
+        Value::Number(Number::from(pay_data_json.device_type.parse::<i64>()?)),
+    );
+    post_data.insert(
+        "customerId".to_string(),
+        Value::Number(pay_data_json.customer_id.into()),
+    );
+    post_data.insert(
+        "orderExpire".to_string(),
+        Value::String(pay_data_json.order_expire.to_string()),
+    );
+    post_data.insert(
+        "productId".to_string(),
+        Value::String(pay_data_json.product_id.to_string()),
+    );
+    post_data.insert(
+        "version".to_string(),
+        Value::String(pay_data_json.version.to_string()),
+    );
+    post_data.insert(
+        "payAmount".to_string(),
+        Value::String(pay_data_json.pay_amount.to_string()),
+    );
+    post_data.insert(
+        "signType".to_string(),
+        Value::String(pay_data_json.sign_type.to_string()),
+    );
+    post_data.insert(
+        "sign".to_string(),
+        Value::String(pay_data_json.sign.to_string()),
+    );
+    post_data.insert(
+        "uid".to_string(),
+        Value::String(pay_data_json.uid.to_string()),
+    );
+    post_data.insert(
+        "timestamp".to_string(),
+        Value::String(pay_data_json.timestamp.to_string()),
+    );
+    post_data.insert(
+        "serviceType".to_string(),
+        Value::String(pay_data_json.service_type.to_string()),
+    );
+    post_data.insert(
+        "traceId".to_string(),
+        Value::String(pay_data_json.trace_id.to_string()),
+    );
+    post_data.insert(
+        "payChannelId".to_string(),
+        Value::Number(Number::from(99 as i64)),
+    );
+    post_data.insert(
+        "accessKey".to_string(),
+        Value::String(accessKey.to_string()),
+    );
+    post_data.insert(
+        "appVersion".to_string(),
+        Value::String("6.58.0".to_string()),
+    );
+    post_data.insert("network".to_string(), Value::String("WIFI".to_string()));
+    post_data.insert("device".to_string(), Value::String("iOS".to_string()));
+    post_data.insert("sdkVersion".to_string(), Value::String("1.4.8".to_string()));
+    post_data.insert("payChannel".to_string(), Value::String("bp".to_string()));
+    post_data.insert(
+        "appName".to_string(),
+        Value::String("tv.danmaku.bilianime".to_string()),
+    );
+    post_data.insert(
+        "notifyUrl".to_string(),
+        Value::String(pay_data_json.notify_url.to_string()),
+    );
+    post_data.insert(
+        "orderId".to_string(),
+        Value::String(pay_data_json.order_id.to_string()),
+    );
 
     let res = client
         .post("https://pay.bilibili.com/payplatform/pay/pay")
         .headers(headers.clone())
-        .form(&post_data)
+        .json(&post_data)
         .send()
         .await?
-        .json::<ConfirmOrderResp>()
+        .json::<PayOrderResp>()
         .await?;
 
     Ok(res)
@@ -308,6 +426,24 @@ pub async fn handle_pre_sale(
     Ok(())
 }
 
+// 查询支付状态
+pub async fn query_pay(
+    cookies: &user_info_params,
+    client: &Client,
+    order_id: &String,
+) -> Result<PayQueryResp> {
+    let res = client
+        .get("https://api.bilibili.com/x/garb/trade/query")
+        .header("cookie", parse_cookies(cookies))
+        .query(&[("order_id", order_id), ("csrf", &cookies.bili_jct)])
+        .send()
+        .await?
+        .json::<PayQueryResp>()
+        .await?;
+
+    Ok(res)
+}
+
 pub async fn get_suit_detail(cookies: &user_info_params, suit_id: i32) -> Result<SuitDetailResp> {
     let client = reqwest::Client::new();
     let res = client
@@ -324,12 +460,15 @@ pub async fn get_suit_detail(cookies: &user_info_params, suit_id: i32) -> Result
 // 创建 header
 use crate::bili_resp::confirm_order::ConfirmOrderResp;
 use crate::bili_resp::create_order::CreateOrderResp;
+use crate::bili_resp::pay_data::PayDataResp;
+use crate::bili_resp::pay_order::PayOrderResp;
+use crate::bili_resp::pay_query::PayQueryResp;
 use reqwest::header::{
     HeaderMap, HeaderName, HeaderValue, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CONNECTION, CONTENT_TYPE,
     REFERER, USER_AGENT,
 };
 
-fn construct_headers(cookies: &user_info_params) -> HeaderMap {
+fn construct_headers(cookies: &user_info_params, suit_id: &i64) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
         ACCEPT_ENCODING,
@@ -345,13 +484,15 @@ fn construct_headers(cookies: &user_info_params) -> HeaderMap {
         ACCEPT_LANGUAGE,
         HeaderValue::from_static("zh-CN,zh-Hans;q=0.9"),
     );
-    headers.insert(
-        REFERER,
-        HeaderValue::from_static("https://www.bilibili.com/h5/mall/suit/detail"),
-    );
+    let referString = format!("https://www.bilibili.com/h5/mall/suit/detail?{}", suit_id);
+    headers.insert(REFERER, referString.as_str().parse().unwrap());
     headers.insert(
         "X-CSRF-TOKEN",
-        cookies.bili_jct.clone().parse().expect("解析cookies失败"),
+        cookies
+            .bili_jct
+            .clone()
+            .parse()
+            .expect("解析referString失败"),
     );
     headers.insert(
         "Cookie",
@@ -362,54 +503,55 @@ fn construct_headers(cookies: &user_info_params) -> HeaderMap {
     headers
 }
 
-// fn construct_pay_headers(cookies: &user_info_params) -> HeaderMap {
-//     let mut headers = HeaderMap::new();
-//     headers.insert(
-//         ACCEPT_ENCODING,
-//         HeaderValue::from_static("gzip, deflate, br"),
-//     );
-//     headers.insert(USER_AGENT, HeaderValue::from_static(UA));
-//     headers.insert(
-//         CONTENT_TYPE,
-//         HeaderValue::from_static("application/x-www-form-urlencoded"),
-//     );
-//     headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
-//     headers.insert(
-//         ACCEPT_LANGUAGE,
-//         HeaderValue::from_static("zh-CN,zh-Hans;q=0.9"),
-//     );
-//     headers.insert(
-//         REFERER,
-//         HeaderValue::from_static("https://www.bilibili.com/h5/mall/suit/detail"),
-//     );
-//     headers.insert(
-//         "Cookie",
-//         parse_cookies(cookies.clone())
-//             .parse()
-//             .expect("解析cookies失败"),
-//     );
-//     headers.insert(
-//         "cLocale",
-//         "zh_CN".parse().expect("解析cLocale失败"),
-//     );
-//     headers.insert(
-//         "sLocale",
-//         "zh_CN".parse().expect("解析sLocale失败"),
-//     );
-//     headers.insert(
-//         "Buvid",
-//         cookies..clone().parse().expect("解析Buvid失败"),
-//     );
-//     "Buvid": Buvid,
-//     "Device-ID": device_id,
-//     "fp_local": fp_local,
-//     "fp_remote": fp_remove,
-//     "session_id": session_id,
-//     "deviceFingerprint": devicefingerprint,
-//     "buildId": appVer,
-//     "env": "prod",
-//     "APP-KEY": "android",
-//     "User-Agent": pay_User_Agent,
-//     "bili-bridge-engine": "cronet",
-//     headers
-// }
+pub fn construct_pay_headers(cookies: &user_info_params) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        ACCEPT_ENCODING,
+        HeaderValue::from_static("gzip, deflate, br"),
+    );
+    headers.insert(USER_AGENT, HeaderValue::from_static(UA.as_str()));
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/x-www-form-urlencoded"),
+    );
+    headers.insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+    headers.insert(
+        ACCEPT_LANGUAGE,
+        HeaderValue::from_static("zh-CN,zh-Hans;q=0.9"),
+    );
+    headers.insert(
+        REFERER,
+        HeaderValue::from_static("https://www.bilibili.com/h5/mall/suit/detail"),
+    );
+    // headers.insert(
+    //     "Cookie",
+    //     parse_cookies(cookies.clone())
+    //         .parse()
+    //         .expect("解析cookies失败"),
+    // );
+    // headers.insert("cLocale", "zh_CN".parse().expect("解析cLocale失败"));
+    // headers.insert("sLocale", "zh_CN".parse().expect("解析sLocale失败"));
+    headers.insert("buvid", buvid.parse().expect("解析Buvid失败"));
+    // headers.insert("Device-ID", device_id.parse().expect("解析device_id失败"));
+    // headers.insert("fp_local", fp_local.parse().expect("解析fp_local失败"));
+    // headers.insert("fp_remote", fp_remove.parse().expect("解析fp_remove失败"));
+    headers.insert(
+        "session_id",
+        session_id.parse().expect("解析session_id失败"),
+    );
+    headers.insert(
+        "deviceFingerprint",
+        deviceFingerprint
+            .parse()
+            .expect("解析deviceFingerprint失败"),
+    );
+    headers.insert("buildId", buildId.parse().expect("解析buildId失败"));
+    headers.insert("env", "prod".parse().expect("解析env失败"));
+    headers.insert("User-Agent", UA.parse().expect("解析UA失败"));
+    headers.insert("mobiapp", mobiapp.parse().expect("解析mobiapp失败"));
+    headers.insert(
+        "Content-Type",
+        "application/json".parse().expect("解析bridge失败"),
+    );
+    headers
+}
