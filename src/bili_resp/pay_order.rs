@@ -14,15 +14,29 @@ pub struct PayOrderResp {
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Data {
-    pub wx_id: String,
-    pub tx_id: String,
+    pub trace_id: String,
+    pub server_time: i64,
     pub customer_id: i64,
-    pub total_pay_bp: i64,
-    pub pay_counpon: i64,
-    pub bp_rate: f64,
-    pub fee_type: String,
-    pub pay_amount: i64,
-    pub pay_time: i64,
-    pub status: String,
     pub order_id: String,
+    pub tx_id: i64,
+    pub pay_channel: String,
+    pub device_type: i64,
+    pub pay_channel_param: String,
+    pub pay_channel_url: String,
+    #[serde(rename = "queryOrderReqVO")]
+    pub query_order_req_vo: QueryOrderReqVo,
+    pub return_url: String,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryOrderReqVo {
+    pub trace_id: String,
+    pub check_third_channel: String,
+    pub customer_id: String,
+    pub sign: String,
+    pub sign_type: String,
+    pub version: String,
+    pub tx_ids: String,
+    pub timestamp: String,
 }

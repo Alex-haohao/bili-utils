@@ -10,6 +10,7 @@ use console::Term;
 use crossbeam_channel::tick;
 use dialoguer::Confirm;
 use dialoguer::{theme::ColorfulTheme, Input, Select};
+use fancy_regex::Regex;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -46,6 +47,7 @@ static ref UA: String = format!("Mozilla/5.0 (Linux; Android 10; HLK-AL10 Build/
 pub async fn checking_all_selling(cookies: &user_info_params) -> Result<SuitAllResp> {
     let client = reqwest::ClientBuilder::new()
         .cookie_store(true)
+        .brotli(true)
         .user_agent(&*UA)
         .build()?;
     let cookies_header = parse_cookies(cookies);
@@ -211,30 +213,35 @@ pub async fn handle_buy_suit(cookies: &user_info_params) -> Result<()> {
         }
     }
 
-    //3. 支付订单
-    let pay_order_res = pay_pay(&pay_header, &client, confirmed_order).await?;
-    if pay_order_res.code != None && pay_order_res.code.expect("无法获取返回code") == 0 {
-        println!("{}", pay_order_res.msg);
+    //3. 创建订单
+    let (pay_order_res, pay_zone) = pay_pay(&pay_header, &client, confirmed_order).await?;
+    if pay_order_res.errno == 0 {
+        println!("创建订单成功");
     } else {
+        println!("{:?}", pay_order_res);
         println!("{}", pay_order_res.msg);
         return Ok(());
     }
 
-    //4. 查询支付状态
-    let ticker = tick(Duration::from_millis(200));
-    loop {
-        ticker.recv().unwrap();
-        let pay_status = query_pay(cookies, &client, &new_order.data.order_id).await?;
-        if pay_status.code != 0 {
-            println!("{}", pay_status.message);
-            return Ok(());
-        }
-        if pay_status.data.expect("查询支付状态失败").state == "paid" {
-            println!("支付成功");
-            break;
-        }
+    //4. 支付订单
+    let pay_bp_res = pay_bp(&pay_header, &client, pay_order_res).await;
+    if let Err(e) = pay_bp_res {
+        println!("{}", e);
+        return Ok(());
     }
-
+    let pay_bp_res = pay_bp_res.expect("支付出错");
+    if pay_bp_res.errno == 0 {
+        let success = pay_bp_res.success;
+        if success {
+            println!("支付成功");
+        } else {
+            println!("支付失败");
+        }
+    } else {
+        println!("{:?}", pay_bp_res);
+        println!("{}", pay_bp_res.msg);
+        return Ok(());
+    }
     Ok(())
 }
 
@@ -293,12 +300,12 @@ pub async fn confirm_order(
 
 use serde_json::{Map, Number};
 
-//支付
+//创建支付订单
 pub async fn pay_pay(
     headers: &reqwest::header::HeaderMap,
     client: &Client,
     orderDetail: ConfirmOrderResp,
-) -> Result<PayOrderResp> {
+) -> Result<(PayOrderResp, String)> {
     let mut post_data = Map::new();
     let pay_data = orderDetail.data.expect("获取paydata失败");
     let pay_data_json: PayDataResp = serde_json::from_str(pay_data.pay_data.as_str())?;
@@ -398,8 +405,103 @@ pub async fn pay_pay(
         .headers(headers.clone())
         .json(&post_data)
         .send()
+        .await?;
+
+    let pay_zone = res
+        .headers()
+        .get("Set-Cookie")
+        .expect("获取payzone失败")
+        .to_str()
+        .expect("转换payzone失败");
+
+    let re = Regex::new(r"(?!payzone=)\w+(?=;)").expect("正则表达式错误");
+    let pay_zone = re
+        .find(pay_zone)
+        .expect("Result payzone失败")
+        .expect("option payzone失败")
+        .as_str()
+        .to_string();
+
+    let res = res.json::<PayOrderResp>().await?;
+
+    Ok((res, pay_zone))
+}
+
+//确认支付订单
+pub async fn pay_bp(
+    headers: &reqwest::header::HeaderMap,
+    client: &Client,
+    pay_pay_resp: PayOrderResp,
+) -> Result<PayBpResp> {
+    let mut post_data = Map::new();
+    let pay_data = pay_pay_resp.data.expect("获取pay_channel失败");
+    let pay_channel_json: PayChannelParam =
+        serde_json::from_str(pay_data.pay_channel_param.as_str())?;
+
+    post_data.insert(
+        "orderId".to_string(),
+        Value::String(pay_channel_json.order_id.to_string()),
+    );
+    post_data.insert(
+        "productId".to_string(),
+        Value::String(pay_channel_json.product_id.to_string()),
+    );
+    post_data.insert(
+        "feeType".to_string(),
+        Value::String(pay_channel_json.fee_type.to_string()),
+    );
+    post_data.insert(
+        "customerName".to_string(),
+        Value::String(pay_channel_json.customer_name.to_string()),
+    );
+    post_data.insert(
+        "noBpCoupon".to_string(),
+        Value::String(pay_channel_json.no_bp_coupon.to_string()),
+    );
+    post_data.insert(
+        "mid".to_string(),
+        Value::String(pay_channel_json.mid.to_string()),
+    );
+    post_data.insert(
+        "timestamp".to_string(),
+        Value::String(pay_channel_json.timestamp.to_string()),
+    );
+    post_data.insert(
+        "customerId".to_string(),
+        Value::String(pay_channel_json.customer_id.to_string()),
+    );
+    post_data.insert(
+        "txId".to_string(),
+        Value::String(pay_channel_json.tx_id.to_string()),
+    );
+    post_data.insert(
+        "remark".to_string(),
+        Value::String(pay_channel_json.remark.to_string()),
+    );
+    post_data.insert(
+        "platformType".to_string(),
+        Value::String(pay_channel_json.platform_type.to_string()),
+    );
+    post_data.insert(
+        "orderCreateTime".to_string(),
+        Value::String(pay_channel_json.order_create_time.to_string()),
+    );
+    post_data.insert(
+        "payAmout".to_string(),
+        Value::String(pay_channel_json.pay_amout.to_string()),
+    );
+    post_data.insert(
+        "sign".to_string(),
+        Value::String(pay_channel_json.sign.to_string()),
+    );
+
+    let res = client
+        .post("https://pay.bilibili.com/paywallet/pay/payBp")
+        .headers(headers.clone())
+        .json(&post_data)
+        .send()
         .await?
-        .json::<PayOrderResp>()
+        .json::<PayBpResp>()
         .await?;
 
     Ok(res)
@@ -460,6 +562,8 @@ pub async fn get_suit_detail(cookies: &user_info_params, suit_id: i32) -> Result
 // 创建 header
 use crate::bili_resp::confirm_order::ConfirmOrderResp;
 use crate::bili_resp::create_order::CreateOrderResp;
+use crate::bili_resp::pay_bp::PayBpResp;
+use crate::bili_resp::pay_channel_param::PayChannelParam;
 use crate::bili_resp::pay_data::PayDataResp;
 use crate::bili_resp::pay_order::PayOrderResp;
 use crate::bili_resp::pay_query::PayQueryResp;
@@ -523,18 +627,7 @@ pub fn construct_pay_headers(cookies: &user_info_params) -> HeaderMap {
         REFERER,
         HeaderValue::from_static("https://www.bilibili.com/h5/mall/suit/detail"),
     );
-    // headers.insert(
-    //     "Cookie",
-    //     parse_cookies(cookies.clone())
-    //         .parse()
-    //         .expect("解析cookies失败"),
-    // );
-    // headers.insert("cLocale", "zh_CN".parse().expect("解析cLocale失败"));
-    // headers.insert("sLocale", "zh_CN".parse().expect("解析sLocale失败"));
     headers.insert("buvid", buvid.parse().expect("解析Buvid失败"));
-    // headers.insert("Device-ID", device_id.parse().expect("解析device_id失败"));
-    // headers.insert("fp_local", fp_local.parse().expect("解析fp_local失败"));
-    // headers.insert("fp_remote", fp_remove.parse().expect("解析fp_remove失败"));
     headers.insert(
         "session_id",
         session_id.parse().expect("解析session_id失败"),

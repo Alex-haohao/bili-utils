@@ -1,5 +1,7 @@
 pub mod confirm_order;
 pub mod create_order;
+pub mod pay_bp;
+pub mod pay_channel_param;
 pub mod pay_data;
 pub mod pay_order;
 pub mod pay_query;
