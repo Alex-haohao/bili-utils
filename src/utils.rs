@@ -50,3 +50,8 @@ pub fn random_id(PASSWORD_LEN: u32, long: bool) -> String {
 
     password
 }
+
+pub fn get_current_local_time() -> i64 {
+    let local_time = Utc::now().timestamp();
+    local_time
+}

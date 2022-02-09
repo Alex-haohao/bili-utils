@@ -2,8 +2,8 @@ use crate::bili_resp::suit_all::SuitAllResp;
 use crate::bili_resp::suit_detail::SuitDetailResp;
 use crate::client::parse_cookies;
 use crate::user_info_params;
-use crate::utils::get_bili_server_time;
 use crate::utils::random_id;
+use crate::utils::{get_bili_server_time, get_current_local_time};
 use anyhow::Result;
 use chrono::{Local, Utc};
 use console::Term;
@@ -138,8 +138,6 @@ pub async fn buy_suit(cookies: &user_info_params) -> Result<()> {
         println!("本地时间和bilibili服务器时间一致");
     } else {
     }
-    println!("{}", server_time);
-    println!("{}", local_time);
 
     //输入要购买的装扮id
     let suit_id: String = Input::new()
@@ -175,22 +173,25 @@ pub async fn buy_suit(cookies: &user_info_params) -> Result<()> {
         } else {
             //装扮未开卖
             println!("装扮未开卖");
-            handle_pre_sale(cookies, &res).await;
+            handle_pre_sale(cookies, &res).await?;
         }
     }
 
     Ok(())
 }
 
-pub async fn handle_buy_suit(cookies: &user_info_params) -> Result<()> {
-    let test_suit = get_suit_detail(cookies, 34151).await?;
-    let suit_id = test_suit.data.item.item_id;
+pub async fn handle_buy_suit(
+    cookies: &user_info_params,
+    suit_id: i64,
+    add_month: u32,
+    buy_num: u32,
+) -> Result<()> {
     let client = reqwest::ClientBuilder::new().cookie_store(true).build()?;
     let headers = construct_headers(cookies, &suit_id);
     let pay_header = construct_pay_headers(cookies);
 
     // 1. create-order 创建订单
-    let new_order = create_order(cookies, &headers, &client, 1, 1, suit_id).await?;
+    let new_order = create_order(cookies, &headers, &client, add_month, buy_num, suit_id).await?;
     if new_order.code != 0 {
         println!("{}", new_order.message);
         return Ok(());
@@ -522,8 +523,28 @@ pub async fn handle_pre_sale(
     let next_number = sale_quantity - sale_surplus + 1;
     println!("{}", next_number);
     //计算倒计时
-    let mut count_down = sale_time_begin - get_bili_server_time().await?;
-    println!("{}", count_down);
+    let mut count_down = sale_time_begin - get_current_local_time();
+
+    // 每1秒计算一次当前时间
+    let ticker = tick(Duration::from_millis(1000));
+    loop {
+        ticker.recv().unwrap();
+        println!("倒计时:{}", count_down);
+        count_down = sale_time_begin - get_current_local_time();
+        if count_down <= 10 {
+            break;
+        }
+    }
+
+    println!("开始快速刷新");
+    // 距离开始时间还有十秒，开始快速刷新
+    loop {
+        count_down = sale_time_begin - get_current_local_time();
+        // 本地与服务器大概2～3秒误差 这里也可以直接用bili server time 进行判断
+        if count_down <= 3 {
+            break;
+        }
+    }
 
     Ok(())
 }

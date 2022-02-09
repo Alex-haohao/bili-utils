@@ -62,7 +62,6 @@ pub async fn main_process() -> Result<()> {
                         buy_suit(&cookies).await?;
                     } else if index == 2 {
                         // 直接购买-测试
-                        handle_buy_suit(&cookies).await?;
                     } else {
                         println!("{}", "暂未开放");
                         // construct_pay_headers(&cookies);
